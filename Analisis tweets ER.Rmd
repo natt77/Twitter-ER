@@ -213,9 +213,7 @@ p
 wordcloud(palab_frec.df$word, palab_frec.df$freq, scale=c(3,0.5), random.color=FALSE,random.order = FALSE, colors=colorRampPalette(brewer.pal(6,"Blues"))(32),
 max.words=45, rot.per=0)
 ```
-
-
-#Analisis cluster
+##Analisis cluster
 
 ```{r}
 #convert dtm to matrix
