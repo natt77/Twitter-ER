@@ -1,0 +1,237 @@
+---
+title: "Twitter - Analisis hashtags ER"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Cargamos librerías y leemos ficheros
+
+```{r}
+
+# Para la funcion Corpus()
+library(tm)
+# Para la funciÃ³n rbind.fill
+library(plyr)
+library(SnowballC)
+# Para los graficos
+library(ggplot2)  
+# Para la nube de palabras
+library(wordcloud)
+# para el analisis cluster
+library(cluster)
+# para dibujar dendogramas
+library(ggdendro)
+
+fenfermedades <-  read.csv("/resources/data/Captura de #DiaMundialEnfermedadesRaras - Archive.csv", header = TRUE, stringsAsFactors = FALSE,encoding = "ANSII", sep=",")
+
+ffeder <-  read.csv("/resources/data/captura de SOMOSFEDER - Archive.csv", header = TRUE, stringsAsFactors = FALSE,encoding = "ANSII", sep=",")
+
+
+fall <- rbind(fenfermedades, ffeder)
+
+fall$id_str <- as.character(fall$id_str)
+fall$from_user_id_str <- as.character(fall$from_user_id_str)
+
+```
+
+##Extraemos variables temporales
+
+```{r}
+
+Sys.setlocale("LC_TIME", "English")
+
+#Extraemos la fecha + hora
+fall$fechah <- as.POSIXct(fall$created_at, format="%a %b %d %H:%M:%S %z %Y")
+
+#Extraemos el dia de la semana
+fall$dia_sem <- weekdays(fall$fechah)
+
+#Extraemos la fecha
+fall$fecha <- as.POSIXct(fall$created_at, format="%a %b %d")
+
+#Extraemos la hora
+fall$hora <-  strftime(fall$fechah, format="%H")
+
+#Ordenamos los dias
+fall$dia_sem <- factor(fall$dia_sem, levels=c("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"))
+
+
+```
+
+##Representamos variables temporales
+
+```{r}
+
+#DF con la frecuencia por fecha
+date_freq <- as.data.frame(base::table(fall$fecha))
+#date_freq <- data.frame(date_freq[date$Freq>20,])
+
+#DF con la frecuencia por dia de la semena
+day_freq <- as.data.frame(base::table(fall$dia_sem))
+
+#DF con la frecuencia por hora
+hour_freq <- as.data.frame(base::table(fall$hora))
+
+#DF con la frecuencia por localizacion
+location_freq <- as.data.frame(base::table(fall$user_location))
+location_freq <- location_freq[location_freq$Var1!="",]
+location_freq <- location_freq[location_freq$Freq>80,]
+location_freq <- location_freq[order(location_freq$Freq),]
+location_freq$Var1 <- factor(location_freq$Var1, as.character(location_freq$Var1))
+
+#DF con la frecuencia por usuario
+user_freq <- as.data.frame(base::table(fall$from_user))
+user_freq <- user_freq[user_freq$Freq>70,]
+user_freq <- user_freq[order(user_freq$Freq),]
+user_freq$Var1 <- factor(user_freq$Var1, as.character(user_freq$Var1))
+
+#Ordenamos el factor para que al mostrar el gráfico aparezca ordenado de menor a mayor frecuencia
+day_freq$Var1 <- factor(day_freq$Var1, levels = day_freq$Var1[order(day_freq$Freq)])
+
+
+#Gráfico que muestra la frecuencia de mensajes según la fecha
+p <- ggplot(date_freq, aes(Var1, Freq))  
+p <- p + geom_bar(stat="identity")   
+p <- p + theme(axis.text.x=element_text(angle=45, hjust=1)) + xlab("Date") + ylab("Frequency")  
+p 
+
+
+#Gráfico que muestra la frecuencia de mensajes según el día de la semana
+p <- ggplot(day_freq, aes(Var1, Freq))  
+p <- p + geom_bar(stat="identity")   
+p <- p + theme(axis.text.x=element_text(angle=45, hjust=1)) + xlab("Day") + ylab("Frequency")  
+p 
+
+
+#Gráfico que muestra la frecuencia de mensajes según la hora del día 
+p <- ggplot(hour_freq, aes(Var1, Freq))  
+p <- p + geom_bar(stat="identity")   
+p <- p + theme(axis.text.x=element_text(angle=45, hjust=1))   
+p <- p + xlab("Hour") + ylab("Frequency")
+p
+
+
+#Gráfico que muestra la frecuencia de mensajes según la localizacion 
+p <- ggplot(location_freq, aes(Var1, Freq))  
+p <- p + geom_bar(stat="identity")   
+p <- p + theme(axis.text.x=element_text(angle=45, hjust=1))   
+p <- p + xlab("Location") + ylab("Frequency")
+p
+
+
+#Gráfico que muestra la frecuencia de mensajes por usuario 
+p <- ggplot(user_freq, aes(Var1, Freq))  
+p <- p + geom_bar(stat="identity")   
+p <- p + theme(axis.text.x=element_text(angle=45, hjust=1))   
+p <- p + xlab("User") + ylab("Frequency")
+p
+
+
+```
+
+##Creamos corpus con palabras
+
+```{r}
+
+linea <- fall$text
+
+#creamos corpus
+doc.corpus <- Corpus(VectorSource(linea))
+
+# Vamos a ir eliminando/modificando el corpus para quedarnos solo con las palabras necesarias 
+# Transformamos a minÃºsculas
+doc.corpus <- tm_map(doc.corpus, content_transformer(tolower)) 
+# Quitamos la puntuacion
+doc.corpus <- tm_map(doc.corpus, removePunctuation) 
+# Quitamos numeros
+doc.corpus <- tm_map(doc.corpus, removeNumbers)
+# Quitamos espacios en blanco
+doc.corpus <- tm_map(doc.corpus, stripWhitespace)
+# Quitamos palabras sin valor analitico, en ingles y espaÃ±ol
+doc.corpus <- tm_map(doc.corpus, removeWords, stopwords("spanish")) 
+#doc.corpus <- tm_map(doc.corpus, removeWords, stopwords("english"))  
+# Palabras especificas
+# revisar, añadirlas a un fichero
+doc.corpus <- tm_map(doc.corpus, removeWords, c("somosfeder","diamundialenfermedadesraras"))   
+# sustituimos palabras derivadas 
+
+# Indicamos que nuestro corpus es un texto
+doc.corpus <- tm_map(doc.corpus, PlainTextDocument) 
+
+# Creamos una matriz de terminos - documentos
+TDM_all <- TermDocumentMatrix(doc.corpus)
+
+# Para evitar tener palabras que son muy cortas 
+# (2,inf) nos indica la longitud minima de las palabras, por defecto es 3
+TDM <- TermDocumentMatrix(doc.corpus, 
+       control = list(wordLengths = c(3, Inf))) 
+
+# Veamos que tamaño tiene
+dim(TDM)
+
+inspect(TDM[1:20,1:8])
+
+
+
+# Reducimos la matriz
+# cuanto mayor ponemos el coeficiente mÃ¡s palabras tenemos
+# probar con varios valores
+TDM <- removeSparseTerms(TDM, 0.995)
+#dtms
+inspect(TDM[1:5,1:5])
+
+
+#muestra matriz de terminos
+TDM_matrix<-as.matrix(TDM)
+frecuencia <- sort(rowSums(TDM_matrix), decreasing=TRUE)
+palab_frec.df <- data.frame(word=names(frecuencia), freq=frecuencia)
+
+
+```
+
+##Visualizamos frecuencias de palabras y nube
+
+```{r}
+
+#visualizamos una grafica con la frecuenca de las palabras
+
+#Seleccionamos solo las que aparecen mas de 700 veces
+#probar varios valores
+filtrado <- data.frame(subset(palab_frec.df, freq>700))
+
+# histograma de frecuencias
+p <- ggplot(filtrado, aes(word, freq))    
+p <- p + geom_bar(stat="identity")   
+p <- p + theme(axis.text.x=element_text(angle=45, hjust=1))   
+p 
+
+
+#nube de palabras
+wordcloud(palab_frec.df$word, palab_frec.df$freq, scale=c(3,0.5), random.color=FALSE,random.order = FALSE, colors=colorRampPalette(brewer.pal(6,"Blues"))(32),
+max.words=45, rot.per=0)
+```
+
+
+#Analisis cluster
+
+```{r}
+#convert dtm to matrix
+TDM_clus <- removeSparseTerms(TDM, 0.98)
+
+#muestra matriz de terminos
+TDM_matrix_clus<-as.matrix(TDM_clus)
+d <- dist(TDM_matrix_clus)
+
+
+
+#run hierarchical clustering using Ward’s method
+groups <- hclust(d,method='ward.D')
+
+
+ggdendrogram(groups, rotate = FALSE, size = 2)
+```
+
+
